@@ -20,7 +20,7 @@ def update_display(listboxes):
     instructors = cursor.fetchall()
     for instructor in instructors:
         instructor_listbox.insert(tk.END, f"{instructor[1]} (ID: {instructor[0]})")
-
+    # I added this comment just to learn git 
     course_listbox.delete(0, tk.END)
     cursor.execute("SELECT * FROM courses")
     courses = cursor.fetchall()
