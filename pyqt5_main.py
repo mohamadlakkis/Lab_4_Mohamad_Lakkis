@@ -1,9 +1,13 @@
+import threading
 import sys
 import json
 import sqlite3
 from PyQt5 import QtWidgets, QtGui
-from PyQt5.QtWidgets import QMessageBox, QListWidget, QVBoxLayout, QLabel, QLineEdit, QComboBox, QPushButton, QFormLayout, QHBoxLayout, QGridLayout, QFileDialog
-
+from PyQt5.QtWidgets import QMessageBox, QListWidget, QVBoxLayout, QLabel, QLineEdit, QComboBox, QPushButton, QFormLayout, QHBoxLayout, QGridLayout, QFileDialog, QFrame, QWidget
+from PyQt5.QtGui import QWindow
+from PyQt5 import QtCore
+from tkinter_display import create_tkinter_frame, update_display
+from tkinter import TclError
 
 class SchoolManagementApp(QtWidgets.QWidget):
     def __init__(self):
@@ -15,9 +19,7 @@ class SchoolManagementApp(QtWidgets.QWidget):
         self.setGeometry(100, 100, 1200, 600)
         self.main_layout = QGridLayout(self)
 
-        # Create the UI elements
         self.create_search_frame()
-        self.create_display_section()
         self.create_student_form()
         self.create_course_form()
         self.create_instructor_form()
@@ -25,10 +27,12 @@ class SchoolManagementApp(QtWidgets.QWidget):
         self.create_clear_all_form()
         self.create_save_load_buttons()
 
+        self.embed_tkinter_display()
+
         self.setLayout(self.main_layout)
-        self.update_display_section()
 
     def create_tables(self):
+        self.conn.execute("PRAGMA foreign_keys = ON")
         try:
             cursor = self.conn.cursor()
             cursor.execute('''
@@ -68,6 +72,24 @@ class SchoolManagementApp(QtWidgets.QWidget):
         except sqlite3.Error as e:
             print(f"Error creating tables: {e}")
 
+    def embed_tkinter_display(self):
+        self.tk_container = QFrame(self)
+        self.tk_container_layout = QVBoxLayout()
+        self.tk_container.setLayout(self.tk_container_layout)
+        self.main_layout.addWidget(self.tk_container, 1, 2, 4, 1)
+
+        def run_tkinter():
+            root, listboxes = create_tkinter_frame()
+            try:
+                update_display(listboxes)
+                root.mainloop()
+            except TclError as e:
+                print(f"Error with Tkinter: {e}")
+
+        tkinter_thread = threading.Thread(target=run_tkinter)
+        tkinter_thread.daemon = True
+        tkinter_thread.start()
+
     def create_search_frame(self):
         search_frame = QtWidgets.QWidget()
         search_layout = QHBoxLayout()
@@ -106,7 +128,7 @@ class SchoolManagementApp(QtWidgets.QWidget):
             cursor.execute("SELECT * FROM instructors WHERE LOWER(name) LIKE ?", ('%' + query + '%',))
             instructors = cursor.fetchall()
             search_results += [f"Instructor: {i[1]}, ID: {i[0]}" for i in instructors]
-        
+
         elif criteria == "ID":
             cursor.execute("SELECT * FROM students WHERE LOWER(student_id) LIKE ?", ('%' + query + '%',))
             students = cursor.fetchall()
@@ -115,9 +137,9 @@ class SchoolManagementApp(QtWidgets.QWidget):
             cursor.execute("SELECT * FROM instructors WHERE LOWER(instructor_id) LIKE ?", ('%' + query + '%',))
             instructors = cursor.fetchall()
             search_results += [f"Instructor: {i[1]}, ID: {i[0]}" for i in instructors]
-        
+
         elif criteria == "Course":
-            cursor.execute("SELECT * FROM courses WHERE LOWER(course_name) LIKE ? OR LOWER(course_id) LIKE ?", 
+            cursor.execute("SELECT * FROM courses WHERE LOWER(course_name) LIKE ? OR LOWER(course_id) LIKE ?",
                            ('%' + query + '%', '%' + query + '%'))
             courses = cursor.fetchall()
             for course in courses:
@@ -138,64 +160,6 @@ class SchoolManagementApp(QtWidgets.QWidget):
         else:
             self.search_listbox.addItem("No matching results found.")
 
-    def create_display_section(self):
-        display_frame = QtWidgets.QWidget()
-        display_layout = QVBoxLayout()
-
-        # Courses 
-        course_label = QLabel("Current Courses", self)
-        course_label.setFont(QtGui.QFont("Helvetica", 12, QtGui.QFont.Bold))
-        display_layout.addWidget(course_label)
-        self.course_listbox_display = QListWidget()
-        display_layout.addWidget(self.course_listbox_display)
-
-        # Students 
-        student_label = QLabel("Current Students", self)
-        student_label.setFont(QtGui.QFont("Helvetica", 12, QtGui.QFont.Bold))
-        display_layout.addWidget(student_label)
-        self.student_listbox_display = QListWidget()
-        display_layout.addWidget(self.student_listbox_display)
-
-        # Instructors 
-        instructor_label = QLabel("Current Instructors", self)
-        instructor_label.setFont(QtGui.QFont("Helvetica", 12, QtGui.QFont.Bold))
-        display_layout.addWidget(instructor_label)
-        self.instructor_listbox_display = QListWidget()
-        display_layout.addWidget(self.instructor_listbox_display)
-
-        display_frame.setLayout(display_layout)
-        self.main_layout.addWidget(display_frame, 1, 2, 4, 1)
-
-    def update_display_section(self):
-        cursor = self.conn.cursor()
-
-        self.course_listbox_display.clear()
-        cursor.execute("SELECT * FROM courses")
-        courses = cursor.fetchall()
-        for course in courses:
-            course_info = f"{course[1]} (ID: {course[0]}) - Instructor: {course[2]}"
-            self.course_listbox_display.addItem(course_info)
-
-        self.student_listbox_display.clear()
-        cursor.execute("SELECT * FROM students")
-        students = cursor.fetchall()
-        for student in students:
-            cursor.execute("SELECT c.course_name FROM enrollments e JOIN courses c ON e.course_id = c.course_id WHERE e.student_id = ?", (student[0],))
-            registered_courses = cursor.fetchall()
-            registered_courses_names = ", ".join([course[0] for course in registered_courses])
-            student_info = f"{student[1]}, Age: {student[2]}, ID: {student[0]}, Email: {student[3]} - Courses: {registered_courses_names}"
-            self.student_listbox_display.addItem(student_info)
-
-        self.instructor_listbox_display.clear()
-        cursor.execute("SELECT * FROM instructors")
-        instructors = cursor.fetchall()
-        for instructor in instructors:
-            cursor.execute("SELECT c.course_name FROM courses c WHERE c.instructor_id = ?", (instructor[0],))
-            assigned_courses = cursor.fetchall()
-            assigned_courses_names = ", ".join([course[0] for course in assigned_courses])
-            instructor_info = f"{instructor[1]}, Age: {instructor[2]}, ID: {instructor[0]}, Email: {instructor[3]} - Courses: {assigned_courses_names}"
-            self.instructor_listbox_display.addItem(instructor_info)
-
     def create_student_form(self):
         student_form_frame = QtWidgets.QWidget()
         student_form_layout = QFormLayout()
@@ -207,6 +171,8 @@ class SchoolManagementApp(QtWidgets.QWidget):
 
         self.course_listbox = QListWidget()
         self.course_listbox.setSelectionMode(QtWidgets.QAbstractItemView.MultiSelection)
+
+        self.update_course_listbox()
 
         student_form_layout.addRow("Student Name:", self.name_entry)
         student_form_layout.addRow("Student Age:", self.age_entry)
@@ -220,6 +186,15 @@ class SchoolManagementApp(QtWidgets.QWidget):
 
         student_form_frame.setLayout(student_form_layout)
         self.main_layout.addWidget(student_form_frame, 1, 0)
+
+    def update_course_listbox(self):
+        self.course_listbox.clear()
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT course_name, course_id FROM courses")
+        courses = cursor.fetchall()
+        for course in courses:
+            course_name, course_id = course
+            self.course_listbox.addItem(f"{course_name} (ID: {course_id})")
 
     def create_student(self):
         name = self.name_entry.text()
@@ -247,7 +222,6 @@ class SchoolManagementApp(QtWidgets.QWidget):
                             (student_id, name, age, email))
                 self.conn.commit()
 
-                # Insert enrollments into the database
                 for course_id in selected_courses:
                     cursor.execute("INSERT INTO enrollments (student_id, course_id) VALUES (?, ?)", (student_id, course_id))
                 self.conn.commit()
@@ -259,7 +233,6 @@ class SchoolManagementApp(QtWidgets.QWidget):
                 self.email_entry.clear()
                 self.course_listbox.clearSelection()
 
-                self.update_display_section()
             except sqlite3.Error as e:
                 self.show_message("Error", f"Failed to add student to the database: {e}")
         else:
@@ -273,6 +246,8 @@ class SchoolManagementApp(QtWidgets.QWidget):
         self.course_id_entry = QLineEdit()
         self.course_instructor_combobox = QComboBox()
 
+        self.update_instructor_combobox()
+
         course_form_layout.addRow("Course Name:", self.course_entry)
         course_form_layout.addRow("Course ID:", self.course_id_entry)
         course_form_layout.addRow("Select Instructor:", self.course_instructor_combobox)
@@ -283,6 +258,15 @@ class SchoolManagementApp(QtWidgets.QWidget):
 
         course_form_frame.setLayout(course_form_layout)
         self.main_layout.addWidget(course_form_frame, 2, 0)
+
+    def update_instructor_combobox(self):
+        self.course_instructor_combobox.clear()
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT name, instructor_id FROM instructors")
+        instructors = cursor.fetchall()
+        for instructor in instructors:
+            instructor_name, instructor_id = instructor
+            self.course_instructor_combobox.addItem(f"{instructor_name} (ID: {instructor_id})")
 
     def create_course(self):
         course_name = self.course_entry.text()
@@ -309,7 +293,6 @@ class SchoolManagementApp(QtWidgets.QWidget):
                 self.course_id_entry.clear()
                 self.course_instructor_combobox.setCurrentIndex(0)
 
-                self.update_display_section()
                 self.update_course_listbox()
             except sqlite3.Error as e:
                 self.show_message("Error", f"Failed to add course to the database: {e}")
@@ -368,7 +351,6 @@ class SchoolManagementApp(QtWidgets.QWidget):
                 self.instructor_email_entry.clear()
 
                 self.update_instructor_combobox()
-                self.update_display_section()
             except sqlite3.Error as e:
                 self.show_message("Error", f"Failed to add instructor to the database: {e}")
         else:
@@ -405,13 +387,13 @@ class SchoolManagementApp(QtWidgets.QWidget):
             students = cursor.fetchall()
             for student in students:
                 self.record_listbox.addItem(f"{student[1]} (ID: {student[0]})")
-        
+
         elif selected_category == "Instructors":
             cursor.execute("SELECT * FROM instructors")
             instructors = cursor.fetchall()
             for instructor in instructors:
                 self.record_listbox.addItem(f"{instructor[1]} (ID: {instructor[0]})")
-        
+
         elif selected_category == "Courses":
             cursor.execute("SELECT * FROM courses")
             courses = cursor.fetchall()
@@ -433,17 +415,17 @@ class SchoolManagementApp(QtWidgets.QWidget):
                 self.conn.commit()
 
                 self.show_message("Success", f"Student (ID: {student_id}) has been deleted.")
-            
+
             elif selected_category == "Instructors":
                 instructor_id = selected_text.split('(ID: ')[1][:-1]
-                cursor.execute("DELETE FROM instructors WHERE instructor_id = ?", (instructor_id,))
                 cursor.execute("DELETE FROM courses WHERE instructor_id = ?", (instructor_id,))
+                cursor.execute("DELETE FROM instructors WHERE instructor_id = ?", (instructor_id,))
                 self.conn.commit()
 
                 self.show_message("Success", f"Instructor (ID: {instructor_id}) has been deleted.")
-            
+
             elif selected_category == "Courses":
-                course_id = selected_text.split('(ID: ')[1].split(') -')[0]
+                course_id = selected_text.split('(ID: ')[1].split(')')[0]
                 cursor.execute("DELETE FROM courses WHERE course_id = ?", (course_id,))
                 cursor.execute("DELETE FROM enrollments WHERE course_id = ?", (course_id,))
                 self.conn.commit()
@@ -451,7 +433,6 @@ class SchoolManagementApp(QtWidgets.QWidget):
                 self.show_message("Success", f"Course (ID: {course_id}) has been deleted.")
 
             self.update_record_listbox()
-            self.update_display_section()
             self.update_course_listbox()
             self.update_instructor_combobox()
         else:
@@ -472,17 +453,33 @@ class SchoolManagementApp(QtWidgets.QWidget):
         if QMessageBox.question(self, "Confirm", "Are you sure you want to delete all records? This action cannot be undone!",
                                 QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
             cursor = self.conn.cursor()
-            cursor.execute("DELETE FROM students")
-            cursor.execute("DELETE FROM instructors")
-            cursor.execute("DELETE FROM courses")
-            cursor.execute("DELETE FROM enrollments")
-            self.conn.commit()
+            
+            try:
+                cursor.execute("DELETE FROM enrollments")
+                cursor.execute("DELETE FROM courses")
+                cursor.execute("DELETE FROM students")
+                cursor.execute("DELETE FROM instructors")
+                self.conn.commit()
 
-            self.update_display_section()
-            self.update_course_listbox()
-            self.update_instructor_combobox()
+                self.update_course_listbox()
+                self.update_instructor_combobox()
+                self.update_record_listbox()
 
-            self.show_message("Success", "All records have been cleared!")
+                self.update_search_criteria()
+                self.update_category_combobox()
+
+                self.show_message("Success", "All records have been cleared!")
+            except sqlite3.Error as e:
+                self.show_message("Error", f"Failed to clear records: {e}")
+
+    def update_search_criteria(self):
+        self.search_entry.clear()
+        self.search_listbox.clear()
+        self.search_criteria.setCurrentIndex(0)
+
+    def update_category_combobox(self):
+        self.category_combobox.setCurrentIndex(0)
+        self.record_listbox.clear()
 
     def create_save_load_buttons(self):
         save_load_frame = QtWidgets.QWidget()
@@ -544,48 +541,41 @@ class SchoolManagementApp(QtWidgets.QWidget):
             self.show_message("Success", "Data has been saved!")
 
     def load_data(self):
-        '''
-        Note that if you want to change this function so that it makes additional changes not remove current data and replace to new, remove the curso.execute("DELETE FROM ...") lines
-        '''
         filename, _ = QFileDialog.getOpenFileName(self, "Load File", "", "JSON Files (*.json);;All Files (*)")
         if filename:
             with open(filename, 'r') as file:
                 data = json.load(file)
 
             cursor = self.conn.cursor()
-            cursor.execute("DELETE FROM students")
-            cursor.execute("DELETE FROM instructors")
-            cursor.execute("DELETE FROM courses")
-            cursor.execute("DELETE FROM enrollments")
-            self.conn.commit()
 
-            for student in data["students"]:
-                cursor.execute("INSERT INTO students (student_id, name, age, email) VALUES (?, ?, ?, ?)", 
-                               (student["student_id"], student["name"], student["age"], student["email"]))
+            try:
+                cursor.execute("DELETE FROM enrollments")
+                cursor.execute("DELETE FROM courses")
+                cursor.execute("DELETE FROM students")
+                cursor.execute("DELETE FROM instructors")
+                self.conn.commit()
 
-            for instructor in data["instructors"]:
-                cursor.execute("INSERT INTO instructors (instructor_id, name, age, email) VALUES (?, ?, ?, ?)", 
-                               (instructor["instructor_id"], instructor["name"], instructor["age"], instructor["email"]))
+                for student in data["students"]:
+                    cursor.execute("INSERT INTO students (student_id, name, age, email) VALUES (?, ?, ?, ?)",
+                                (student["student_id"], student["name"], student["age"], student["email"]))
 
-            for course in data["courses"]:
-                cursor.execute("INSERT INTO courses (course_id, course_name, instructor_id) VALUES (?, ?, ?)", 
-                               (course["course_id"], course["course_name"], course["instructor_id"]))
+                for instructor in data["instructors"]:
+                    cursor.execute("INSERT INTO instructors (instructor_id, name, age, email) VALUES (?, ?, ?, ?)",
+                                (instructor["instructor_id"], instructor["name"], instructor["age"], instructor["email"]))
 
-            self.conn.commit()
-            self.update_display_section()
-            self.update_course_listbox()
-            self.update_instructor_combobox()
+                for course in data["courses"]:
+                    cursor.execute("INSERT INTO courses (course_id, course_name, instructor_id) VALUES (?, ?, ?)",
+                                (course["course_id"], course["course_name"], course["instructor_id"]))
 
-            self.show_message("Success", "Data has been loaded!")
+                self.conn.commit()
 
-    def update_course_listbox(self):
-        self.course_listbox.clear()
-        cursor = self.conn.cursor()
-        cursor.execute("SELECT * FROM courses")
-        courses = cursor.fetchall()
-        for course in courses:
-            course_display = f"{course[1]} ({course[0]}) - {course[2]}"
-            self.course_listbox.addItem(course_display)
+                self.update_course_listbox()
+                self.update_instructor_combobox()
+
+                self.show_message("Success", "Data has been loaded!")
+            
+            except sqlite3.Error as e:
+                self.show_message("Error", f"Failed to load data: {e}")
 
     def update_instructor_combobox(self):
         self.course_instructor_combobox.clear()
@@ -600,7 +590,6 @@ class SchoolManagementApp(QtWidgets.QWidget):
         msg.setWindowTitle(title)
         msg.setText(message)
         msg.exec_()
-
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
